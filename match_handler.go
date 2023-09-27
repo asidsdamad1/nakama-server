@@ -290,6 +290,8 @@ func (m *MatchHandler) MatchLoop(ctx context.Context, logger runtime.Logger, db 
 			Mark:     s.mark,
 			Deadline: t.Add(time.Duration(s.deadlineRemainingTicks/tickRate) * time.Second).Unix(),
 		})
+
+		logger.Info("msg: %v", buf)
 		if err != nil {
 			logger.Error("error encoding message: %v", err)
 		} else {

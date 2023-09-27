@@ -1,7 +1,7 @@
 enum Mark {
-    X = 0,
-    O = 1,
-    UNDEFINED = 2,
+    X = 1,
+    O = 2,
+    UNDEFINED = 0,
 }
 
 // The complete set of opcodes used for communication between clients and server.
@@ -67,10 +67,14 @@ interface MoveMessage {
 interface RpcFindMatchRequest {
     // User can choose a fast or normal speed match.
     fast: boolean
+    matchId: string
+    matchName: string
+    userId: string
 }
 
 // Payload for an RPC response containing match IDs the user can join.
 interface RpcFindMatchResponse {
     // One or more matches that fit the user's request.
     matchIds: string[]
+    matchName: string
 }

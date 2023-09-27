@@ -33,9 +33,18 @@ const winningPositions: number[][] = [
 interface MatchLabel {
     open: number
     fast: number
+    matchName: string
+    accept: boolean
+    userId: string
 }
 
 interface State {
+    playerId: string
+    accept: boolean
+    userId: string
+    matchId: string
+    matchName: string
+    password: string
     // Match label
     label: MatchLabel
     // Ticks where no actions have occurred.
@@ -68,12 +77,21 @@ let matchInit: nkruntime.MatchInitFunction<State> = function (ctx: nkruntime.Con
     var label: MatchLabel = {
         open: 1,
         fast: 0,
+        matchName: '',
+        accept: true,
+        userId: ''
     }
     if (fast) {
         label.fast = 1;
     }
 
     var state: State = {
+        playerId: '',
+        matchId: '',
+        accept: true,
+        userId: params.userId,
+        matchName: params.matchName,
+        password: params.password,
         label: label,
         emptyTicks: 0,
         presences: {},
@@ -88,6 +106,10 @@ let matchInit: nkruntime.MatchInitFunction<State> = function (ctx: nkruntime.Con
         nextGameRemainingTicks: 0,
     }
 
+    logger.info("`state ========> `%v", state)
+
+    label.userId = params.userId
+    label.matchName = state.matchName
     return {
         state,
         tickRate,
@@ -96,6 +118,11 @@ let matchInit: nkruntime.MatchInitFunction<State> = function (ctx: nkruntime.Con
 }
 
 let matchJoinAttempt: nkruntime.MatchJoinAttemptFunction<State> = function (ctx: nkruntime.Context, logger: nkruntime.Logger, nk: nkruntime.Nakama, dispatcher: nkruntime.MatchDispatcher, tick: number, state: State, presence: nkruntime.Presence, metadata: {[key: string]: any}) {
+    logger.info("metadata =====> %v", metadata)
+    logger.info("metadata matchId =====> %v", metadata['matchId'])
+    state.matchId = metadata['matchId'];
+    state.playerId = metadata['playerId'];
+    state.userId = presence.userId;
     // Check if it's a user attempting to rejoin after a disconnect.
     if (presence.userId in state.presences) {
         if (state.presences[presence.userId] === null) {
@@ -114,6 +141,10 @@ let matchJoinAttempt: nkruntime.MatchJoinAttemptFunction<State> = function (ctx:
             }
         }
     }
+
+    // if(ctx.userId === metadata.userId) {
+    //     nk.notificationSend("", "Invite", {accept: true}, 1, null, true)
+    // }
 
     // Check if match is full.
     if (connectedPlayers(state) + state.joinsInProgress >= 2) {
@@ -134,6 +165,20 @@ let matchJoinAttempt: nkruntime.MatchJoinAttemptFunction<State> = function (ctx:
 
 let matchJoin: nkruntime.MatchJoinFunction<State> = function(ctx: nkruntime.Context, logger: nkruntime.Logger, nk: nkruntime.Nakama, dispatcher: nkruntime.MatchDispatcher, tick: number, state: State, presences: nkruntime.Presence[]) {
     const t = msecToSec(Date.now());
+    logger.info("join Match -----------------------------------")
+
+    nk.sqlQuery("UPDATE USERS SET STATUS = 'in match' WHERE ID = $1", [state.userId]);
+
+    logger.info("state.presences ---------> %v", state.presences)
+    logger.info("state.presences ---------> %v", JSON.stringify(state.presences))
+    if(JSON.stringify(state.presences) === "{}") {
+        let payload = {
+            matchId: state.matchId,
+            ownerId: state.userId,
+            playerId: ''
+        };
+        rpcGetUser(ctx, logger, nk, JSON.stringify(payload))
+    }
 
     for (const presence of presences) {
         state.emptyTicks = 0;
@@ -166,7 +211,8 @@ let matchJoin: nkruntime.MatchJoinFunction<State> = function(ctx: nkruntime.Cont
     }
 
     // Check if match was open to new players, but should now be closed.
-    if (Object.keys(state.presences).length >= 2 && state.label.open != 0) {
+    if (Object.keys(state.presences).length
+        >= 2 && state.label.open != 0) {
         state.label.open = 0;
         const labelJSON = JSON.stringify(state.label);
         dispatcher.matchLabelUpdate(labelJSON);
@@ -185,8 +231,6 @@ let matchLeave: nkruntime.MatchLeaveFunction<State> = function(ctx: nkruntime.Co
 }
 
 let matchLoop: nkruntime.MatchLoopFunction<State> = function(ctx: nkruntime.Context, logger: nkruntime.Logger, nk: nkruntime.Nakama, dispatcher: nkruntime.MatchDispatcher, tick: number, state: State, messages: nkruntime.MatchMessage[]) {
-    logger.debug('Running match loop. Tick: %d', tick);
-
     if (connectedPlayers(state) + state.joinsInProgress === 0) {
         state.emptyTicks++;
         if (state.emptyTicks >= maxEmptySec * tickRate) {
@@ -246,7 +290,10 @@ let matchLoop: nkruntime.MatchLoopFunction<State> = function(ctx: nkruntime.Cont
             mark: state.mark,
             deadline: t + Math.floor(state.deadlineRemainingTicks / tickRate),
         }
-        dispatcher.broadcastMessage(OpCode.START, JSON.stringify(msg));
+
+        logger.info("send msg: %s", msg)
+
+        dispatcher.broadcastMessage(OpCode.START, JSON.stringify(msg), null, null, true);
 
         return { state };
     }

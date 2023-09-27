@@ -12,11 +12,213 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+var rpcFindMatch = function (ctx, logger, nk, payload) {
+    if (!ctx.userId) {
+        throw Error('No user ID in context');
+    }
+    if (!payload) {
+        throw Error('Expects payload.');
+    }
+    var request = {};
+    try {
+        request = JSON.parse(payload);
+    }
+    catch (error) {
+        logger.error('Error parsing json message: %q', error);
+        throw error;
+    }
+    var matches;
+    try {
+        var query = "+label.open:1 +label.fast:".concat(request.fast ? 1 : 0);
+        matches = nk.matchList(10, true, null, null, 1, query);
+    }
+    catch (error) {
+        logger.error('Error listing matches: %v', error);
+        throw error;
+    }
+    var matchIds = [];
+    if (matches.length > 0) {
+        // There are one or more ongoing matches the user could join.
+        matchIds = matches.map(function (m) { return m.matchId; });
+    }
+    else {
+        // // No available matches found, create a new one.
+        // try {
+        //     matchIds.push(nk.matchCreate(moduleName, {fast: request.fast, matchName: request.matchName}));
+        // } catch (error) {
+        //     logger.error('Error creating match: %v', error);
+        //     throw error;
+        // }
+        // logger.info("match name =======> %v", ctx.matchLabel)
+    }
+    var res = { matches: matches };
+    return JSON.stringify(res);
+};
+var rpcCreateMatch = function (ctx, logger, nk, payload) {
+    if (!ctx.userId) {
+        throw Error('No user ID in context');
+    }
+    if (!payload) {
+        throw Error('Expects payload.');
+    }
+    logger.info("payload =======> %v", payload);
+    var request = {};
+    try {
+        request = JSON.parse(payload);
+    }
+    catch (error) {
+        logger.error('Error parsing json message: %q', error);
+        throw error;
+    }
+    var matchName = request.matchName;
+    var matchIds = [];
+    // No available matches found, create a new one.
+    try {
+        logger.info("userId %v:   ", ctx.userId);
+        matchIds.push(nk.matchCreate(moduleName, { matchName: "Room", userId: ctx.userId }));
+        logger.info("MacthIds:  %s", matchIds);
+    }
+    catch (error) {
+        logger.error('Error creating match: %v', error);
+        throw error;
+    }
+    var res = { matchIds: matchIds, matchName: matchName };
+    return JSON.stringify(res);
+};
+var rpcGetMatch = function (ctx, logger, nk, payload) {
+    if (!ctx.userId) {
+        throw Error('No user ID in context');
+    }
+    if (!payload) {
+        throw Error('Expects payload.');
+    }
+    logger.info("payload =======> %v", payload);
+    var request = {};
+    try {
+        request = JSON.parse(payload);
+    }
+    catch (error) {
+        logger.error('Error parsing json message: %q', error);
+        throw error;
+    }
+    var matchIds = [];
+    // No available matches found, create a new one.
+    try {
+        matchIds.push(JSON.stringify(nk.matchGet(request.matchId)));
+        logger.info("MacthIds:  %s", matchIds);
+    }
+    catch (error) {
+        logger.error('Error creating match: %v', error);
+        throw error;
+    }
+    // Query for all available matches
+    var matches = nk.matchList(10, true);
+    // Extract the match labels from the match data
+    var matchLabels = matches.map(function (match) { return match.label; });
+    // Return the list of match labels
+    logger.info("matches ============> %v", JSON.stringify(matchLabels));
+    var res = { matchIds: matchIds };
+    return JSON.stringify(res);
+};
+var rpcNotify = function (ctx, logger, nk, payload) {
+    if (!ctx.userId) {
+        throw Error('No user ID in context');
+    }
+    if (!payload) {
+        throw Error('Expects payload.');
+    }
+    logger.info("payload =======> %v", payload);
+    var request = {
+        ownerId: '',
+        matchId: '',
+        playerId: '',
+        playerName: ''
+    };
+    try {
+        request = JSON.parse(payload);
+    }
+    catch (error) {
+        logger.error('Error parsing json message: %q', error);
+        throw error;
+    }
+    nk.notificationSend(request.ownerId, 'Player wants to join match', request, 1, null, true);
+};
+var rpcGetUser = function (context, logger, nk, payload) {
+    // Get a connection from the Nakama pool to execute the query.
+    var rows = [];
+    rows = nk.sqlQuery("SELECT ID FROM USERS WHERE STATUS = 'online' LIMIT 1");
+    // for(let i = 0; i < rows.length; i++) {
+    //
+    // }
+    // Return the online accounts data as the result of the RPC function.
+    logger.info("payload =======> %v", payload);
+    var request = {
+        ownerId: '',
+        matchId: '',
+        playerId: ''
+    };
+    try {
+        request = JSON.parse(payload);
+    }
+    catch (error) {
+        logger.error('Error parsing json message: %q', error);
+        throw error;
+    }
+    logger.info("rows =======> %v", rows);
+    logger.info("user =======> %v", rows[0]['id']);
+    request.playerId = rows[0]['id'];
+    nk.notificationSend(request.playerId, 'Invite to match', request, 1, null, true);
+};
+var afterAuthenticateDevice = function (ctx, logger, nk, data, request) {
+    // Change status after logging in
+    nk.sqlQuery("UPDATE USERS SET STATUS = 'online' WHERE ID = $1", [ctx.userId]);
+};
+var beforeMatchmakerAdd = function (ctx, logger, nk, envelope) {
+    // Force the count multiple to be in multiples of 5
+    var e = envelope;
+    e.matchmakerAdd.countMultiple = 5;
+    return envelope;
+};
+var onMatchmakerMatched = function (ctx, logger, nk, matches) {
+    logger.info("Match is Made");
+    matches.forEach(function (match) {
+        logger.info("Matched user '%s' named '%s'", match.presence.userId, match.presence.username);
+        Object.keys(match.properties).forEach(function (key) {
+            logger.info("Matched on '%s' value '%v'", key, match.properties[key]);
+        });
+    });
+    var matchId = nk.matchCreate("lobby", { "invited": matches });
+    logger.debug(matchId);
+    return matchId;
+};
+///<reference path="match_rpc.ts"/>
+// Copyright 2020 The Nakama Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 var rpcIdRewards = 'rewards_js';
 var rpcIdFindMatch = 'find_match_js';
+var rpcIdCreateMatch = 'create_match_js';
+var rpcIdGetMatch = 'get_match_js';
+var rpcIdNotify = 'notify_js';
 function InitModule(ctx, logger, nk, initializer) {
     initializer.registerRpc(rpcIdRewards, rpcReward);
+    initializer.registerRpc(rpcIdCreateMatch, rpcCreateMatch);
     initializer.registerRpc(rpcIdFindMatch, rpcFindMatch);
+    initializer.registerRpc(rpcIdGetMatch, rpcGetMatch);
+    initializer.registerRpc(rpcIdNotify, rpcNotify);
+    // initializer.registerRtBefore("MatchmakerAdd", beforeMatchmakerAdd)
+    // initializer.registerMatchmakerMatched(onMatchmakerMatched);
+    // initializer.registerAfterAuthenticateDevice(afterAuthenticateDevice);
     initializer.registerMatch(moduleName, {
         matchInit: matchInit,
         matchJoinAttempt: matchJoinAttempt,
@@ -75,53 +277,55 @@ function rpcReward(context, logger, nk, payload) {
     var d = new Date();
     d.setHours(0, 0, 0, 0);
     // If last claimed is before the new day grant a new reward!
-    if (dailyReward.lastClaimUnix < msecToSec(d.getTime())) {
-        resp.coinsReceived = 500;
-        // Update player wallet.
-        var changeset = {
-            coins: resp.coinsReceived,
-        };
-        try {
-            nk.walletUpdate(context.userId, changeset, {}, false);
-        }
-        catch (error) {
-            logger.error('walletUpdate error: %q', error);
-            throw error;
-        }
-        var notification = {
-            code: 1001,
-            content: changeset,
-            persistent: true,
-            subject: "You've received your daily reward!",
-            userId: context.userId,
-        };
-        try {
-            nk.notificationsSend([notification]);
-        }
-        catch (error) {
-            logger.error('notificationsSend error: %q', error);
-            throw error;
-        }
-        dailyReward.lastClaimUnix = msecToSec(Date.now());
-        var write = {
-            collection: 'reward',
-            key: 'daily',
-            permissionRead: 1,
-            permissionWrite: 0,
-            value: dailyReward,
-            userId: context.userId,
-        };
-        if (objects.length > 0) {
-            write.version = objects[0].version;
-        }
-        try {
-            nk.storageWrite([write]);
-        }
-        catch (error) {
-            logger.error('storageWrite error: %q', error);
-            throw error;
-        }
-    }
+    // if (dailyReward.lastClaimUnix < msecToSec(d.getTime())) {
+    //     resp.coinsReceived = 500;
+    //
+    //     // Update player wallet.
+    //     var changeset = {
+    //         coins: resp.coinsReceived,
+    //     }
+    //     try {
+    //         nk.walletUpdate(context.userId, changeset, {}, false);
+    //     } catch (error) {
+    //         logger.error('walletUpdate error: %q', error);
+    //         throw error;
+    //     }
+    //
+    //     var notification: nkruntime.NotificationRequest = {
+    //         code: 1001,
+    //         content: changeset,
+    //         persistent: true,
+    //         subject: "You've received your daily reward!",
+    //         userId: context.userId,
+    //     }
+    //     try {
+    //         nk.notificationsSend([notification]);
+    //     } catch (error) {
+    //         logger.error('notificationsSend error: %q', error);
+    //         throw error;
+    //     }
+    //
+    //     dailyReward.lastClaimUnix = msecToSec(Date.now());
+    //
+    //     var write: nkruntime.StorageWriteRequest = {
+    //         collection: 'reward',
+    //         key: 'daily',
+    //         permissionRead: 1,
+    //         permissionWrite: 0,
+    //         value: dailyReward,
+    //         userId: context.userId,
+    //     }
+    //     if (objects.length > 0) {
+    //         write.version = objects[0].version
+    //     }
+    //
+    //     try {
+    //         nk.storageWrite([ write ])
+    //     } catch (error) {
+    //         logger.error('storageWrite error: %q', error);
+    //         throw error;
+    //     }
+    // }
     var result = JSON.stringify(resp);
     logger.debug('rpcReward resp: %q', result);
     return result;
@@ -131,9 +335,9 @@ function msecToSec(n) {
 }
 var Mark;
 (function (Mark) {
-    Mark[Mark["X"] = 0] = "X";
-    Mark[Mark["O"] = 1] = "O";
-    Mark[Mark["UNDEFINED"] = 2] = "UNDEFINED";
+    Mark[Mark["X"] = 1] = "X";
+    Mark[Mark["O"] = 2] = "O";
+    Mark[Mark["UNDEFINED"] = 0] = "UNDEFINED";
 })(Mark || (Mark = {}));
 // The complete set of opcodes used for communication between clients and server.
 var OpCode;
@@ -183,11 +387,20 @@ var matchInit = function (ctx, logger, nk, params) {
     var label = {
         open: 1,
         fast: 0,
+        matchName: '',
+        accept: true,
+        userId: ''
     };
     if (fast) {
         label.fast = 1;
     }
     var state = {
+        playerId: '',
+        matchId: '',
+        accept: true,
+        userId: params.userId,
+        matchName: params.matchName,
+        password: params.password,
         label: label,
         emptyTicks: 0,
         presences: {},
@@ -201,6 +414,9 @@ var matchInit = function (ctx, logger, nk, params) {
         winnerPositions: null,
         nextGameRemainingTicks: 0,
     };
+    logger.info("`state ========> `%v", state);
+    label.userId = params.userId;
+    label.matchName = state.matchName;
     return {
         state: state,
         tickRate: tickRate,
@@ -208,6 +424,11 @@ var matchInit = function (ctx, logger, nk, params) {
     };
 };
 var matchJoinAttempt = function (ctx, logger, nk, dispatcher, tick, state, presence, metadata) {
+    logger.info("metadata =====> %v", metadata);
+    logger.info("metadata matchId =====> %v", metadata['matchId']);
+    state.matchId = metadata['matchId'];
+    state.playerId = metadata['playerId'];
+    state.userId = presence.userId;
     // Check if it's a user attempting to rejoin after a disconnect.
     if (presence.userId in state.presences) {
         if (state.presences[presence.userId] === null) {
@@ -227,6 +448,9 @@ var matchJoinAttempt = function (ctx, logger, nk, dispatcher, tick, state, prese
             };
         }
     }
+    // if(ctx.userId === metadata.userId) {
+    //     nk.notificationSend("", "Invite", {accept: true}, 1, null, true)
+    // }
     // Check if match is full.
     if (connectedPlayers(state) + state.joinsInProgress >= 2) {
         return {
@@ -244,6 +468,18 @@ var matchJoinAttempt = function (ctx, logger, nk, dispatcher, tick, state, prese
 };
 var matchJoin = function (ctx, logger, nk, dispatcher, tick, state, presences) {
     var t = msecToSec(Date.now());
+    logger.info("join Match -----------------------------------");
+    nk.sqlQuery("UPDATE USERS SET STATUS = 'in match' WHERE ID = $1", [state.userId]);
+    logger.info("state.presences ---------> %v", state.presences);
+    logger.info("state.presences ---------> %v", JSON.stringify(state.presences));
+    if (JSON.stringify(state.presences) === "{}") {
+        var payload = {
+            matchId: state.matchId,
+            ownerId: state.userId,
+            playerId: ''
+        };
+        rpcGetUser(ctx, logger, nk, JSON.stringify(payload));
+    }
     for (var _i = 0, presences_1 = presences; _i < presences_1.length; _i++) {
         var presence = presences_1[_i];
         state.emptyTicks = 0;
@@ -275,7 +511,8 @@ var matchJoin = function (ctx, logger, nk, dispatcher, tick, state, presences) {
         }
     }
     // Check if match was open to new players, but should now be closed.
-    if (Object.keys(state.presences).length >= 2 && state.label.open != 0) {
+    if (Object.keys(state.presences).length
+        >= 2 && state.label.open != 0) {
         state.label.open = 0;
         var labelJSON = JSON.stringify(state.label);
         dispatcher.matchLabelUpdate(labelJSON);
@@ -292,7 +529,6 @@ var matchLeave = function (ctx, logger, nk, dispatcher, tick, state, presences) 
 };
 var matchLoop = function (ctx, logger, nk, dispatcher, tick, state, messages) {
     var _a;
-    logger.debug('Running match loop. Tick: %d', tick);
     if (connectedPlayers(state) + state.joinsInProgress === 0) {
         state.emptyTicks++;
         if (state.emptyTicks >= maxEmptySec * tickRate) {
@@ -332,7 +568,7 @@ var matchLoop = function (ctx, logger, nk, dispatcher, tick, state, messages) {
         var marks_1 = [Mark.X, Mark.O];
         Object.keys(state.presences).forEach(function (userId) {
             var _a;
-            state.marks[userId] = (_a = marks_1.shift(), (_a !== null && _a !== void 0 ? _a : null));
+            state.marks[userId] = (_a = marks_1.shift()) !== null && _a !== void 0 ? _a : null;
         });
         state.mark = Mark.X;
         state.winner = null;
@@ -346,7 +582,8 @@ var matchLoop = function (ctx, logger, nk, dispatcher, tick, state, messages) {
             mark: state.mark,
             deadline: t + Math.floor(state.deadlineRemainingTicks / tickRate),
         };
-        dispatcher.broadcastMessage(OpCode.START, JSON.stringify(msg));
+        logger.info("send msg: %s", msg);
+        dispatcher.broadcastMessage(OpCode.START, JSON.stringify(msg), null, null, true);
         return { state: state };
     }
     // There's a game in progresstate. Check for input, update match state, and send messages to clientstate.
@@ -355,7 +592,7 @@ var matchLoop = function (ctx, logger, nk, dispatcher, tick, state, messages) {
         switch (message.opCode) {
             case OpCode.MOVE:
                 logger.debug('Received move message from user: %v', state.marks);
-                var mark = (_a = state.marks[message.sender.userId], (_a !== null && _a !== void 0 ? _a : null));
+                var mark = (_a = state.marks[message.sender.userId]) !== null && _a !== void 0 ? _a : null;
                 if (mark === null || state.mark != mark) {
                     // It is not this player's turn.
                     dispatcher.broadcastMessage(OpCode.REJECTED, null, [message.sender]);
@@ -475,64 +712,9 @@ function connectedPlayers(s) {
     var count = 0;
     for (var _i = 0, _a = Object.keys(s.presences); _i < _a.length; _i++) {
         var p = _a[_i];
-        if (p !== null) {
+        if (s.presences[p] !== null) {
             count++;
         }
     }
     return count;
 }
-// Copyright 2020 The Nakama Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-var rpcFindMatch = function (ctx, logger, nk, payload) {
-    if (!ctx.userId) {
-        throw Error('No user ID in context');
-    }
-    if (!payload) {
-        throw Error('Expects payload.');
-    }
-    var request = {};
-    try {
-        request = JSON.parse(payload);
-    }
-    catch (error) {
-        logger.error('Error parsing json message: %q', error);
-        throw error;
-    }
-    var matches;
-    try {
-        var query = "+label.open:1 +label.fast:" + (request.fast ? 1 : 0);
-        matches = nk.matchList(10, true, null, null, 1, query);
-    }
-    catch (error) {
-        logger.error('Error listing matches: %v', error);
-        throw error;
-    }
-    var matchIds = [];
-    if (matches.length > 0) {
-        // There are one or more ongoing matches the user could join.
-        matchIds = matches.map(function (m) { return m.matchId; });
-    }
-    else {
-        // No available matches found, create a new one.
-        try {
-            matchIds.push(nk.matchCreate(moduleName, { fast: request.fast }));
-        }
-        catch (error) {
-            logger.error('Error creating match: %v', error);
-            throw error;
-        }
-    }
-    var res = { matchIds: matchIds };
-    return JSON.stringify(res);
-};
